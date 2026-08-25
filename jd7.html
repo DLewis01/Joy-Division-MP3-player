@@ -1,0 +1,2710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Audio Waveform Visualiser</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+
+    background: #222;
+    color: white;
+
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+#artworkArea {
+    width: 100%;
+    height: calc(100vh - 120px);
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    background: #222;
+}
+
+#visualizer {
+    display: block;
+    background: #222;
+}
+
+#modeIndicator {
+    position: fixed;
+
+    top: 10px;
+    right: 12px;
+
+    padding: 5px 8px;
+
+    background: rgba(0, 0, 0, 0.7);
+
+    border: 1px solid #555;
+
+    color: #aaa;
+
+    font-family: monospace;
+    font-size: 11px;
+
+    pointer-events: none;
+}
+
+#player {
+    position: fixed;
+
+    left: 0;
+    bottom: 0;
+
+    width: 100%;
+    height: 120px;
+
+    padding: 10px 20px;
+
+    background: #111;
+
+    border-top: 1px solid #444;
+
+    display: flex;
+    flex-direction: column;
+
+    gap: 8px;
+}
+
+#trackInfo {
+    display: flex;
+
+    justify-content: space-between;
+    align-items: center;
+
+    gap: 20px;
+}
+
+#trackName {
+    min-width: 0;
+
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+
+    font-size: 13px;
+}
+
+#time {
+    color: #aaa;
+
+    font-family: monospace;
+    font-size: 12px;
+
+    white-space: nowrap;
+}
+
+#controls {
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+}
+
+button {
+    height: 32px;
+
+    min-width: 42px;
+
+    padding: 0 10px;
+
+    background: #111;
+
+    border: 1px solid #555;
+
+    color: white;
+
+    cursor: pointer;
+}
+
+button:hover {
+    background: #222;
+    border-color: #aaa;
+}
+
+#openButton {
+    min-width: 90px;
+
+    font-size: 11px;
+}
+
+#progress {
+    flex: 1;
+
+    height: 4px;
+
+    appearance: none;
+
+    background: #444;
+
+    cursor: pointer;
+}
+
+#progress::-webkit-slider-thumb {
+    appearance: none;
+
+    width: 10px;
+    height: 10px;
+
+    border-radius: 50%;
+
+    background: white;
+}
+
+#progress::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+
+    border: 0;
+
+    border-radius: 50%;
+
+    background: white;
+}
+
+#volume {
+    width: 80px;
+}
+
+#fileInput {
+    display: none;
+}
+
+</style>
+</head>
+
+<body>
+
+
+<div id="artworkArea">
+
+    <canvas id="visualizer"></canvas>
+
+</div>
+
+
+<div id="modeIndicator"></div>
+
+
+<div id="player">
+
+    <div id="trackInfo">
+
+        <div id="trackName">
+            No track loaded
+        </div>
+
+        <div id="time">
+            0:00 / 0:00
+        </div>
+
+    </div>
+
+
+    <div id="controls">
+
+        <button id="playButton">
+            ▶
+        </button>
+
+        <button id="albumButton"> 
+            PLAY ALBUM 
+        </button>
+
+        <button id="openButton">
+            OPEN MP3
+        </button>
+
+        <input
+            id="progress"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+        >
+
+        <input
+            id="volume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="1"
+        >
+
+    </div>
+
+</div>
+
+
+<input
+    id="fileInput"
+    type="file"
+    accept="audio/*"
+>
+
+
+<audio 
+	id="audio" 
+	preload="metadata" 
+	crossorigin="anonymous" 
+></audio>
+
+
+
+<script>
+
+
+/* =========================================================
+   ELEMENTS
+   ========================================================= */
+
+
+const canvas =
+    document.getElementById("visualizer");
+
+const ctx =
+    canvas.getContext("2d");
+
+
+// =========================================================
+// AUDIO / FILE ELEMENTS
+// =========================================================
+
+const fileInput =
+    document.getElementById("fileInput");
+
+const openButton =
+    document.getElementById("openButton");
+
+const albumButton =
+    document.getElementById("albumButton");
+
+const playButton =
+    document.getElementById("playButton");
+
+const progress =
+    document.getElementById("progress");
+
+const volume =
+    document.getElementById("volume");
+
+const trackName =
+    document.getElementById("trackName");
+
+const timeDisplay =
+    document.getElementById("time");
+
+const modeIndicator =
+    document.getElementById("modeIndicator");
+
+const audio =
+    document.getElementById("audio");
+
+
+// =========================================================
+// ARCHIVE.ORG ALBUM
+// =========================================================
+
+const archiveBase =
+    "https://archive.org/download/" +
+    "1752463207_2008__the_best_of_joy_division/" +
+    "2008.%20The%20Best%20of%20Joy%20Division/";
+
+const albumTracks = [
+    "1-01%20Joy%20Division%20-%20Digital.mp3",
+    "1-02%20Joy%20Division%20-%20Disorder.mp3",
+    "1-03%20Joy%20Division%20-%20Shadowplay.mp3",
+    "1-04%20Joy%20Division%20-%20New%20Dawn%20Fades.mp3",
+    "1-05%20Joy%20Division%20-%20Transmission.mp3",
+    "1-06%20Joy%20Division%20-%20Atmosphere.mp3",
+    "1-07%20Joy%20Division%20-%20Dead%20Souls.mp3",
+    "1-08%20Joy%20Division%20-%20She's%20Lost%20Control.mp3",
+    "1-09%20Joy%20Division%20-%20Love%20Will%20Tear%20Us%20Apart.mp3",
+    "1-10%20Joy%20Division%20-%20These%20Days.mp3",
+    "1-11%20Joy%20Division%20-%20Twenty%20Four%20Hours.mp3",
+    "1-12%20Joy%20Division%20-%20Heart%20and%20Soul.mp3",
+    "1-13%20Joy%20Division%20-%20Incubation.mp3",
+    "1-14%20Joy%20Division%20-%20Isolation.mp3"
+];
+
+const albumNames = [
+    "Digital",
+    "Disorder",
+    "Shadowplay",
+    "New Dawn Fades",
+    "Transmission",
+    "Atmosphere",
+    "Dead Souls",
+    "She's Lost Control",
+    "Love Will Tear Us Apart",
+    "These Days",
+    "Twenty Four Hours",
+    "Heart and Soul",
+    "Incubation",
+    "Isolation"
+];
+
+let albumMode = false;
+let albumIndex = 8;
+
+
+// =========================================================
+// DEFAULT TRACK
+// =========================================================
+
+audio.src =
+    archiveBase +
+    albumTracks[albumIndex];
+
+trackName.textContent =
+    albumNames[albumIndex];
+
+
+
+/* =========================================================
+   CANVAS
+   ========================================================= */
+
+let width = 0;
+let height = 0;
+let dpr = 1;
+
+
+function resizeCanvas() {
+
+    const availableWidth =
+        window.innerWidth - 20;
+
+    const availableHeight =
+        window.innerHeight - 140;
+
+
+    const size =
+        Math.max(
+            100,
+
+            Math.min(
+                availableWidth,
+                availableHeight
+            )
+        );
+
+
+    width = size;
+    height = size;
+
+
+    dpr =
+        window.devicePixelRatio || 1;
+
+
+    canvas.width =
+        Math.round(
+            width * dpr
+        );
+
+    canvas.height =
+        Math.round(
+            height * dpr
+        );
+
+
+    canvas.style.width =
+        width + "px";
+
+    canvas.style.height =
+        height + "px";
+
+
+    ctx.setTransform(
+        dpr,
+        0,
+        0,
+        dpr,
+        0,
+        0
+    );
+}
+
+
+window.addEventListener(
+    "resize",
+    resizeCanvas
+);
+
+
+/* =========================================================
+   AUDIO
+   ========================================================= */
+
+let audioContext = null;
+
+let analyser = null;
+
+let sourceNode = null;
+
+let audioReady = false;
+
+
+const FFT_SIZE = 2048;
+
+
+const waveformBuffer =
+    new Uint8Array(
+        FFT_SIZE
+    );
+
+
+const frequencyBuffer =
+    new Uint8Array(
+        FFT_SIZE / 2
+    );
+
+
+/* =========================================================
+   DISPLAY MODE
+   ========================================================= */
+
+let displayMode = "time";
+
+
+/* =========================================================
+   TIME DOMAIN MODES
+   ========================================================= */
+
+const waveformModes = [
+
+    "BIPOLAR",
+
+    "ABSOLUTE",
+
+    "NORMALISED"
+
+];
+
+
+let waveformMode = 0;
+
+
+/* =========================================================
+   TRACE DIRECTION
+   ========================================================= */
+
+/*
+    false = bottom to top
+
+    true = top to bottom
+*/
+
+let reverseDirection = false;
+
+
+/* =========================================================
+   GENERAL DISPLAY PARAMETERS
+   ========================================================= */
+
+const LEFT_MARGIN = 40;
+
+const RIGHT_MARGIN = 40;
+
+const TOP_MARGIN = 40;
+
+const BOTTOM_MARGIN = 40;
+
+
+const LINE_SPACING = 7;
+
+const X_STEP = 3;
+
+
+const MIN_MAX_AMPLITUDE = 45;
+
+const MAX_MAX_AMPLITUDE = 110;
+
+
+/* =========================================================
+   AUDIO SECTION
+   ========================================================= */
+
+/*
+    This is the section in which the audio waveform
+    exists.
+
+    The amplitude envelope is calculated RELATIVE
+    TO THIS SECTION.
+
+        WAVE_START
+             |
+             v
+
+             /\
+            /  \
+           /    \
+          /      \
+         /        \
+        /          \
+       0     1      0
+       
+        ^          ^
+        |          |
+    WAVE_START  WAVE_END
+*/
+
+const WAVE_START = 0.30;
+
+const WAVE_END = 0.70;
+
+
+/* =========================================================
+   TIMING
+   ========================================================= */
+
+const WAVEFORM_INTERVAL = 35;
+
+const FREQUENCY_INTERVAL = 35;
+
+
+/* =========================================================
+   FREQUENCY DOMAIN
+   ========================================================= */
+
+const FREQUENCY_BANDS = 64;
+
+
+const FREQUENCY_TOP_MARGIN = 50;
+
+const FREQUENCY_BOTTOM_MARGIN = 25;
+
+
+const FREQUENCY_STEP = 10;
+
+const FREQUENCY_AMPLITUDE = 100;
+
+
+/* =========================================================
+   HISTORY
+   ========================================================= */
+
+const waveformHistory = [];
+
+let sequenceNumber = 0;
+
+
+let frequencyHistory = [];
+
+
+/* =========================================================
+   AMPLITUDE ENVELOPE
+   ========================================================= */
+
+/*
+    This is the shared amplitude envelope.
+
+    Input:
+
+        0.0 = left edge
+        0.5 = centre
+        1.0 = right edge
+
+    Output:
+
+        0.0 = zero amplitude
+        1.0 = maximum amplitude
+
+
+                 1.0
+                  |
+                 /\
+                /  \
+               /    \
+              /      \
+             /        \
+        0---+----------+---0
+           0.0        1.0
+
+*/
+
+
+//depricated
+function _audioEnvelope(position) {
+
+    if (
+        position < WAVE_START ||
+        position > WAVE_END
+    ) {
+
+        return 0;
+    }
+
+
+    const sectionPosition =
+        (
+            position -
+            WAVE_START
+        ) /
+        (
+            WAVE_END -
+            WAVE_START
+        );
+
+
+    return Math.sin(
+        sectionPosition *
+        Math.PI
+    );
+}
+
+
+
+function amplitudeEnvelope(position) {
+
+    /*
+        position is 0..1 across the entire waveform.
+
+        Outside the audio section we retain a small
+        minimum amplitude, just like the original
+        p5.js code.
+    */
+
+    if (position <= WAVE_START) {
+        return 0;
+    }
+
+    if (position >= WAVE_END) {
+        return 0;
+    }
+
+    const sectionPosition =
+        (position - WAVE_START) /
+        (WAVE_END - WAVE_START);
+
+//simple cosine curve
+//    return Math.sin(
+//        sectionPosition * 0.2*Math.PI
+//    );
+
+
+	//bell curve Agnesi function
+	const x = 2 * sectionPosition - 1;
+
+	//return (Math.pow(
+	//    1 / (1 + x * x),0.5)-.5
+	//return (1 / (1 + x * x)-0.5) * 100;
+	//);
+	
+	return (1 / (1 + x * x)-0.5) * 2;
+
+}
+
+
+function frequencyAmplitudeEnvelope(position) {
+    const x = 2 * position - 1;
+
+    return ((1 / (1 + x*x ))-0.5)*2;
+
+}
+
+
+
+
+/* =========================================================
+   SEEDED RANDOM
+   ========================================================= */
+
+function seededRandom(seed) {
+
+    const value =
+        Math.sin(
+            seed * 12.9898
+        ) * 43758.5453;
+
+
+    return (
+        value -
+        Math.floor(value)
+    );
+}
+
+
+/* =========================================================
+   RANDOM RIPPLE
+   ========================================================= */
+
+function createRipple(seed) {
+
+    const controlCount = 40;
+
+    const controls = [];
+
+
+    for (
+        let i = 0;
+        i < controlCount;
+        i++
+    ) {
+
+        controls.push(
+            seededRandom(
+                seed +
+                i * 71.391
+            )
+        );
+
+    }
+
+
+    return function(position) {
+
+        const scaled =
+            position *
+            (controlCount - 1);
+
+
+        const index =
+            Math.floor(
+                scaled
+            );
+
+
+        const fraction =
+            scaled - index;
+
+
+        const a =
+            controls[
+                Math.min(
+                    index,
+                    controlCount - 1
+                )
+            ];
+
+
+        const b =
+            controls[
+                Math.min(
+                    index + 1,
+                    controlCount - 1
+                )
+            ];
+
+
+        const smooth =
+            fraction *
+            fraction *
+            (3 - 2 * fraction);
+
+
+        return (
+            a +
+            (b - a) *
+            smooth
+        );
+    };
+}
+
+
+/* =========================================================
+   INITIALISE FREQUENCY HISTORY
+   ========================================================= */
+
+function initialiseFrequencyHistory() {
+
+    frequencyHistory = [];
+
+
+    for (
+        let band = 0;
+        band < FREQUENCY_BANDS;
+        band++
+    ) {
+
+        frequencyHistory.push([]);
+
+    }
+}
+
+/* =========================================================
+   SEED FREQUENCY DISPLAY
+   ========================================================= */
+
+function seedFrequencyHistory() {
+
+    const bands =
+        captureFrequencyBands();
+
+    frequencyHistory = [];
+
+    for (
+        let band = 0;
+        band < FREQUENCY_BANDS;
+        band++
+    ) {
+
+        const history = [];
+
+        for (
+            let x = LEFT_MARGIN;
+            x <= width - RIGHT_MARGIN;
+            x += FREQUENCY_STEP
+        ) {
+
+            /*
+                Store the raw FFT amplitude.
+
+                The envelope is NOT applied here.
+                It will be applied when the sample
+                is drawn according to its position
+                on the screen.
+            */
+            history.push({
+                x: x,
+                amplitude: bands[band]
+            });
+        }
+
+        frequencyHistory.push(
+            history
+        );
+    }
+}
+
+/* =========================================================
+   CAPTURE TIME DOMAIN
+   ========================================================= */
+
+function captureTimeDomain() {
+
+    const result =
+        new Float32Array(
+            512
+        );
+
+
+    if (
+        !audioReady ||
+        !analyser
+    ) {
+
+        return result;
+    }
+
+
+    analyser.getByteTimeDomainData(
+        waveformBuffer
+    );
+
+
+    const step =
+        waveformBuffer.length /
+        result.length;
+
+
+    let maximum = 0;
+
+
+    for (
+        let i = 0;
+        i < result.length;
+        i++
+    ) {
+
+        const index =
+            Math.floor(
+                i * step
+            );
+
+
+        /*
+            Convert 0-255 into
+            approximately -1 to +1.
+        */
+
+        const bipolar =
+            (
+                waveformBuffer[index] -
+                128
+            ) / 128;
+
+
+        let value;
+
+
+        if (
+            waveformMode === 0
+        ) {
+
+            value =
+                bipolar;
+
+        }
+        else {
+
+            value =
+                Math.abs(
+                    bipolar
+                );
+
+        }
+
+
+        result[i] =
+            value;
+
+
+        maximum =
+            Math.max(
+                maximum,
+                Math.abs(value)
+            );
+    }
+
+
+    /*
+        Normalised mode.
+    */
+
+    if (
+        waveformMode === 2 &&
+        maximum > 0.0001
+    ) {
+
+        for (
+            let i = 0;
+            i < result.length;
+            i++
+        ) {
+
+            result[i] /=
+                maximum;
+
+        }
+    }
+
+
+    return result;
+}
+
+
+/* =========================================================
+   CAPTURE FFT
+   ========================================================= */
+
+function captureFrequencyBands() {
+
+    if (
+        !audioReady ||
+        !analyser
+    ) {
+
+        return new Float32Array(
+            FREQUENCY_BANDS
+        );
+    }
+
+
+    analyser.getByteFrequencyData(
+        frequencyBuffer
+    );
+
+
+    const result =
+        new Float32Array(
+            FREQUENCY_BANDS
+        );
+
+
+    const usefulBins =
+        Math.floor(
+            frequencyBuffer.length *
+            0.45
+        );
+
+
+    for (
+        let band = 0;
+        band < FREQUENCY_BANDS;
+        band++
+    ) {
+
+        const bandStart =
+            Math.floor(
+                Math.pow(
+                    band /
+                    FREQUENCY_BANDS,
+                    1.7
+                ) *
+                usefulBins
+            );
+
+
+        const bandEnd =
+            Math.max(
+                bandStart + 1,
+
+                Math.floor(
+                    Math.pow(
+                        (band + 1) /
+                        FREQUENCY_BANDS,
+                        1.7
+                    ) *
+                    usefulBins
+                )
+            );
+
+
+        let total = 0;
+
+        let count = 0;
+
+
+        for (
+            let i = bandStart;
+            i < bandEnd;
+            i++
+        ) {
+
+            total +=
+                frequencyBuffer[i];
+
+            count++;
+        }
+
+
+        const average =
+            count > 0
+                ? total / count
+                : 0;
+
+
+        result[band] =
+            average / 255;
+    }
+
+
+    return result;
+}
+
+
+/* =========================================================
+   CREATE TIME-DOMAIN WAVEFORM
+   ========================================================= */
+
+function createWaveform(audioData) {
+
+    const seed =
+        sequenceNumber++;
+
+    const ripple =
+        createRipple(seed * 137.17);
+
+    const random =
+        seededRandom(seed * 91.73);
+
+    const maxAmplitude =
+        MIN_MAX_AMPLITUDE +
+        random *
+        (
+            MAX_MAX_AMPLITUDE -
+            MIN_MAX_AMPLITUDE
+        );
+
+    const points = [];
+
+    const startX =
+        LEFT_MARGIN;
+
+    const endX =
+        width -
+        RIGHT_MARGIN;
+
+    const displayWidth =
+        endX -
+        startX;
+
+
+    for (
+        let x = startX;
+        x <= endX;
+        x += X_STEP
+    ) {
+
+        const position =
+            (
+                x - startX
+            ) /
+            displayWidth;
+
+
+        /*
+            -----------------------------------------
+            AMPLITUDE ENVELOPE
+            -----------------------------------------
+        */
+
+        envelope =
+            amplitudeEnvelope(
+                position
+            );
+
+
+        /*
+            Convert the 0..1 envelope into the
+            actual amplitude.
+
+            There is ALWAYS a minimum amplitude.
+        */
+
+        const MIN_AMPLITUDE = 1;
+
+        const amplitude =
+            MIN_AMPLITUDE +
+            (
+                maxAmplitude -
+                MIN_AMPLITUDE
+            ) *
+            envelope;
+
+
+        /*
+            -----------------------------------------
+            RANDOM RIPPLE
+            -----------------------------------------
+        */
+
+        const randomValue =
+            (
+                ripple(position) -
+                0.5
+            ) * 2;
+
+
+        /*
+            -----------------------------------------
+            AUDIO SIGNAL
+            -----------------------------------------
+        */
+
+        let audioValue = 0;
+
+
+        if (
+            position >= WAVE_START &&
+            position <= WAVE_END
+        ) {
+
+            const audioPosition =
+                (
+                    position -
+                    WAVE_START
+                ) /
+                (
+                    WAVE_END -
+                    WAVE_START
+                );
+
+
+            const sampleIndex =
+                Math.floor(
+                    audioPosition *
+                    (
+                        audioData.length - 1
+                    )
+                );
+
+
+            audioValue =
+                audioData[
+                    sampleIndex
+                ];
+        }
+
+
+        /*
+            -----------------------------------------
+            COMBINE AUDIO AND RANDOM RIPPLE
+            -----------------------------------------
+        */
+
+        /*
+            The live analyser is the waveform inside
+            the central audio section. The random ripple
+            is retained for the quiet lead-in and lead-out.
+        */
+        const waveformValue =
+            (
+                position >= WAVE_START &&
+                position <= WAVE_END
+            )
+                ? audioValue
+                : randomValue;
+
+
+        /*
+            -----------------------------------------
+            FINAL VERTICAL POSITION
+            -----------------------------------------
+        */
+
+        const offset =
+            waveformValue *
+            amplitude;
+
+
+        points.push({
+
+            x: x,
+
+            offset: offset
+
+        });
+    }
+
+
+    return {
+
+        points: points,
+
+        y:
+            reverseDirection
+                ? TOP_MARGIN
+                : height -
+                  BOTTOM_MARGIN,
+
+        sequence: seed
+
+    };
+}
+
+
+
+
+
+/* =========================================================
+   ADD TIME-DOMAIN WAVEFORM
+   ========================================================= */
+
+function addWaveform() {
+
+    const audioData =
+        captureTimeDomain();
+
+
+    const waveform =
+        createWaveform(
+            audioData
+        );
+
+
+    waveformHistory.push(
+        waveform
+    );
+
+
+    /*
+        Move all existing waveforms.
+    */
+
+    for (
+        let i = 0;
+        i <
+        waveformHistory.length - 1;
+        i++
+    ) {
+
+        if (
+            reverseDirection
+        ) {
+
+            waveformHistory[i].y +=
+                LINE_SPACING;
+
+        }
+        else {
+
+            waveformHistory[i].y -=
+                LINE_SPACING;
+
+        }
+    }
+
+
+    /*
+        Remove waveforms that have
+        moved outside the canvas.
+    */
+
+    if (
+        reverseDirection
+    ) {
+
+        while (
+            waveformHistory.length &&
+            waveformHistory[0].y >
+                height -
+                BOTTOM_MARGIN
+        ) {
+
+            waveformHistory.shift();
+
+        }
+
+    }
+    else {
+
+        while (
+            waveformHistory.length &&
+            waveformHistory[0].y <
+                TOP_MARGIN
+        ) {
+
+            waveformHistory.shift();
+
+        }
+    }
+}
+
+
+/* =========================================================
+   DRAW WAVE SURFACE
+   ========================================================= */
+
+function drawWaveSurface(
+    waveform,
+    olderWaveform
+) {
+    const points =
+        waveform.points;
+
+    const y =
+        waveform.y;
+
+    if (
+        points.length < 2
+    ) {
+        return;
+    }
+
+    /*
+        The opaque surface extends toward the older
+        waveform. Newer waveforms are drawn later,
+        so their surfaces cover the older traces.
+    */
+
+    const surfaceY =
+        olderWaveform
+            ? (y + olderWaveform.y) / 2
+            : height + 20;
+
+    const surface =
+        new Path2D();
+
+    surface.moveTo(
+        points[0].x,
+        y - points[0].offset
+    );
+
+    for (
+        let i = 1;
+        i < points.length;
+        i++
+    ) {
+        surface.lineTo(
+            points[i].x,
+            y - points[i].offset
+        );
+    }
+
+    surface.lineTo(
+        points[points.length - 1].x,
+        surfaceY
+    );
+
+    surface.lineTo(
+        points[0].x,
+        surfaceY
+    );
+
+    surface.closePath();
+
+    ctx.fillStyle = "#222";
+    ctx.fill(surface);
+}
+
+
+/* =========================================================
+   DRAW WAVE LINE
+   ========================================================= */
+
+function drawWaveLine(
+    waveform
+) {
+
+    const points =
+        waveform.points;
+
+
+    const y =
+        waveform.y;
+
+
+    if (
+        points.length < 2
+    ) {
+
+        return;
+    }
+
+
+    ctx.beginPath();
+
+
+    ctx.moveTo(
+        points[0].x,
+        y -
+        points[0].offset
+    );
+
+
+    for (
+        let i = 1;
+        i < points.length;
+        i++
+    ) {
+
+        ctx.lineTo(
+            points[i].x,
+            y -
+            points[i].offset
+        );
+
+    }
+
+
+    ctx.strokeStyle =
+        "#fff";
+
+
+    ctx.lineWidth =
+        1.1;
+
+
+    ctx.lineCap =
+        "round";
+
+
+    ctx.lineJoin =
+        "round";
+
+
+    ctx.stroke();
+}
+
+
+/* =========================================================
+   DRAW TIME DOMAIN
+   ========================================================= */
+
+function drawTimeDomain() {
+    /*
+        Draw complete waveform layers from oldest to
+        newest. Each newer waveform paints its opaque
+        surface over the older waveform behind it,
+        then its white line is redrawn on top.
+    */
+
+    for (
+        let i = 0;
+        i < waveformHistory.length;
+        i++
+    ) {
+        const olderWaveform =
+            i > 0
+                ? waveformHistory[i - 1]
+                : null;
+
+        drawWaveSurface(
+            waveformHistory[i],
+            olderWaveform
+        );
+
+        drawWaveLine(
+            waveformHistory[i]
+        );
+    }
+}
+
+
+/* =========================================================
+   FREQUENCY BAND Y POSITION
+   ========================================================= */
+
+function frequencyBandY(
+    band
+) {
+
+    const usableHeight =
+        height -
+        FREQUENCY_TOP_MARGIN -
+        FREQUENCY_BOTTOM_MARGIN;
+
+
+    return (
+        height -
+        FREQUENCY_BOTTOM_MARGIN -
+
+        (
+            band /
+            (
+                FREQUENCY_BANDS - 1
+            )
+        ) *
+
+        usableHeight
+    );
+}
+
+
+/* =========================================================
+   ADD FFT SAMPLE
+   ========================================================= */
+
+function addFrequencySample() {
+
+    const bands =
+        captureFrequencyBands();
+
+
+    for (
+        let band = 0;
+        band < FREQUENCY_BANDS;
+        band++
+    ) {
+
+        const history =
+            frequencyHistory[band];
+
+
+        /*
+            Move existing samples left.
+        */
+
+        for (
+            let i = 0;
+            i < history.length;
+            i++
+        ) {
+
+            history[i].x -=
+                FREQUENCY_STEP;
+        }
+
+
+        /*
+            Newest sample enters on the RIGHT.
+        */
+//modified by adding envelope
+        history.push({
+
+            x:
+                width -
+                RIGHT_MARGIN,
+
+            amplitude:
+                bands[band]
+
+        });
+
+
+        /*
+            Remove samples that have left
+            the canvas.
+        */
+
+        while (
+            history.length &&
+            history[0].x <
+                LEFT_MARGIN -
+                FREQUENCY_AMPLITUDE
+        ) {
+
+            history.shift();
+
+        }
+    }
+}
+
+
+/* =========================================================
+   DRAW FREQUENCY BAND
+   ========================================================= */
+
+
+function drawFrequencyBand(band) {
+
+    const history =
+        frequencyHistory[band];
+
+    const baseline =
+        frequencyBandY(
+            band
+        );
+
+    const ripple =
+        createRipple(
+            (band + 1) * 913.17
+        );
+
+    
+
+
+
+    /*
+        We need at least two samples
+        to draw the waveform.
+    */
+    if (history.length < 2) {
+        return;
+    }
+
+    ctx.beginPath();
+
+    for (
+        let i = 0;
+        i < history.length;
+        i++
+    ) {
+
+        const sample =
+            history[i];
+
+        /*
+            Convert the sample's X position
+            into 0..1 across the entire display.
+        */
+        const position =
+            (
+                sample.x -
+                LEFT_MARGIN
+            ) /
+            (
+                width -
+                LEFT_MARGIN -
+                RIGHT_MARGIN
+            );
+
+        const clampedPosition =
+            Math.max(
+                0,
+                Math.min(
+                    1,
+                    position
+                )
+            );
+
+        /*
+            The FFT waveform only occupies
+            the central section.
+        */
+        const inAudioSection =
+            clampedPosition >= WAVE_START &&
+            clampedPosition <= WAVE_END;
+
+        let displayedAmplitude = 0;
+
+        if (inAudioSection) {
+
+            /*
+                Convert the position within the
+                central section to 0..1.
+            */
+            const sectionPosition =
+                (
+                    clampedPosition -
+                    WAVE_START
+                ) /
+                (
+                    WAVE_END -
+                    WAVE_START
+                );
+
+            /*
+                Random ripple used by the FFT.
+            */
+            const rippleValue =
+                (
+                    ripple(
+                        sectionPosition
+                    ) -
+                    0.5
+                ) * 0.2;
+
+            /*
+                Raw FFT amplitude.
+            */
+            const rawAmplitude =
+                sample.amplitude *
+                FREQUENCY_AMPLITUDE;
+
+            /*
+                FFT gets its own envelope.
+                The time-domain envelope is NOT
+                used here.
+            */
+            const envelope =
+                frequencyAmplitudeEnvelope(
+                    sectionPosition
+                );
+
+            /*
+                Apply the FFT envelope to the
+                complete reactive waveform.
+            */
+            displayedAmplitude =
+                (
+                    rawAmplitude +
+                    rippleValue * 1.5
+                ) * envelope;
+        }
+
+        /*
+            Outside the central section,
+            displayedAmplitude remains zero.
+
+            Therefore the line is perfectly
+            horizontal there.
+        */
+        const y =
+            baseline -
+            displayedAmplitude;
+
+        if (i === 0) {
+            ctx.moveTo(
+                sample.x,
+                y
+            );
+        } else {
+            ctx.lineTo(
+                sample.x,
+                y
+            );
+        }
+    }
+
+    ctx.strokeStyle =
+        "#ffffff";
+
+    ctx.lineWidth =
+        1.0;
+
+    ctx.stroke();
+}
+
+
+
+
+/* =========================================================
+   DRAW FREQUENCY DOMAIN
+   ========================================================= */
+
+function drawFrequencyDomain() {
+
+    for (
+        let band = 0;
+        band < FREQUENCY_BANDS;
+        band++
+    ) {
+
+        drawFrequencyBand(
+            band
+        );
+
+    }
+}
+
+
+/* =========================================================
+   MAIN DRAW LOOP
+   ========================================================= */
+
+let lastWaveformTime = 0;
+
+let lastFrequencyTime = 0;
+
+
+function draw(timestamp) {
+
+    requestAnimationFrame(
+        draw
+    );
+
+
+    /*
+        Clear the canvas.
+    */
+
+    ctx.fillStyle =
+        "#222";
+
+
+    ctx.fillRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+
+    /*
+        Generate new samples while
+        audio is playing.
+    */
+
+    if (
+        !audio.paused &&
+        audioReady
+    ) {
+
+        if (
+            displayMode === "time"
+        ) {
+
+            if (
+                timestamp -
+                lastWaveformTime >=
+                WAVEFORM_INTERVAL
+            ) {
+
+                lastWaveformTime =
+                    timestamp;
+
+
+                addWaveform();
+
+            }
+
+        }
+        else {
+
+            if (
+                timestamp -
+                lastFrequencyTime >=
+                FREQUENCY_INTERVAL
+            ) {
+
+                lastFrequencyTime =
+                    timestamp;
+
+
+                addFrequencySample();
+
+            }
+        }
+    }
+
+
+    /*
+        Render current mode.
+    */
+
+    if (
+        displayMode === "time"
+    ) {
+
+        drawTimeDomain();
+
+    }
+    else {
+
+        drawFrequencyDomain();
+
+    }
+}
+
+
+/* =========================================================
+   AUDIO INITIALISATION
+   ========================================================= */
+
+function initialiseAudio() {
+
+    if (
+        audioReady
+    ) {
+
+        return true;
+    }
+
+
+    const AudioContextClass =
+        window.AudioContext ||
+        window.webkitAudioContext;
+
+
+    if (
+        !AudioContextClass
+    ) {
+
+        console.error(
+            "Web Audio API unavailable."
+        );
+
+        return false;
+    }
+
+
+    try {
+
+        audioContext =
+            new AudioContextClass();
+
+
+        analyser =
+            audioContext.createAnalyser();
+
+
+        analyser.fftSize =
+            FFT_SIZE;
+
+
+        analyser.smoothingTimeConstant =
+            0.15;
+
+
+        sourceNode =
+            audioContext.createMediaElementSource(
+                audio
+            );
+
+
+        sourceNode.connect(
+            analyser
+        );
+
+
+        analyser.connect(
+            audioContext.destination
+        );
+
+
+        audioReady = true;
+
+
+        initialiseFrequencyHistory();
+
+
+        return true;
+
+    }
+    catch (error) {
+
+        console.error(
+            "Unable to initialise audio:",
+            error
+        );
+
+
+        return false;
+    }
+}
+
+
+/* =========================================================
+   RESUME AUDIO
+   ========================================================= */
+
+async function resumeAudio() {
+
+    if (
+        audioContext &&
+        audioContext.state !== "running"
+    ) {
+
+        try {
+
+            await audioContext.resume();
+
+        }
+        catch (error) {
+
+            console.error(
+                error
+            );
+
+        }
+    }
+}
+
+
+
+function loadTrack(
+    url,
+    name
+) {
+    audio.pause();
+
+    audio.src =
+        url;
+
+    audio.load();
+
+    trackName.textContent =
+        name;
+
+    progress.value =
+        0;
+
+    timeDisplay.textContent =
+        "0:00 / 0:00";
+
+    playButton.textContent =
+        "▶";
+
+    waveformHistory.length =
+        0;
+
+    initialiseFrequencyHistory();
+
+    initialiseAudio();
+}
+
+
+
+/* =========================================================
+   OPEN FILE
+   ========================================================= */
+
+openButton.addEventListener(
+    "click",
+    () => {
+
+        fileInput.click();
+
+    }
+);
+
+
+
+
+/* =========================================================
+   FILE SELECTED
+   ========================================================= */
+
+fileInput.addEventListener(
+    "change",
+    () => {
+
+        const file =
+            fileInput.files[0];
+
+
+        if (!file) {
+
+            return;
+        }
+
+
+        if (
+            audio.dataset.objectURL
+        ) {
+
+            URL.revokeObjectURL(
+                audio.dataset.objectURL
+            );
+        }
+
+
+        const url =
+            URL.createObjectURL(
+                file
+            );
+
+
+        audio.dataset.objectURL =
+            url;
+
+/*
+        audio.pause();
+
+
+        audio.src =
+            url;
+
+
+        audio.load();
+
+
+        trackName.textContent =
+            file.name;
+
+
+        progress.value =
+            0;
+
+
+        timeDisplay.textContent =
+            "0:00 / 0:00";
+
+
+        playButton.textContent =
+            "▶";
+
+
+        waveformHistory.length =
+            0;
+
+
+        initialiseFrequencyHistory();
+
+
+        initialiseAudio();
+*/
+
+	albumMode = false;
+
+	loadTrack(
+    		url,
+    		file.name
+	);
+
+
+
+
+    }
+);
+
+
+/* =========================================================
+   PLAY / PAUSE
+   ========================================================= */
+
+playButton.addEventListener(
+    "click",
+    async () => {
+
+        if (
+            !audio.src
+        ) {
+
+            fileInput.click();
+
+            return;
+        }
+
+
+        if (
+            !initialiseAudio()
+        ) {
+
+            return;
+        }
+
+
+        await resumeAudio();
+
+
+        if (
+            audio.paused
+        ) {
+
+            try {
+
+                await audio.play();
+
+            }
+            catch (error) {
+
+                console.error(
+                    "Playback failed:",
+                    error
+                );
+
+            }
+
+        }
+        else {
+
+            audio.pause();
+
+        }
+    }
+);
+
+
+/* =========================================================
+   AUDIO EVENTS
+   ========================================================= */
+
+audio.addEventListener(
+    "play",
+    () => {
+
+        playButton.textContent =
+            "❚❚";
+
+    }
+);
+
+
+audio.addEventListener(
+    "pause",
+    () => {
+
+        playButton.textContent =
+            "▶";
+
+    }
+);
+
+/*
+audio.addEventListener(
+    "ended",
+    () => {
+
+        playButton.textContent =
+            "▶";
+
+    }
+);
+*/
+
+
+/* =========================================================
+   PLAY ALBUM
+   ========================================================= */
+
+albumButton.addEventListener(
+    "click",
+    async () => {
+
+        /*
+            Album playback always starts at
+            the first track.
+
+            This is deliberately separate from
+            albumIndex = 8, which is used for
+            the default track.
+        */
+        albumMode = true;
+        albumIndex = 0;
+
+        loadTrack(
+            archiveBase +
+            albumTracks[albumIndex],
+            albumNames[albumIndex]
+        );
+
+        await resumeAudio();
+
+        try {
+            await audio.play();
+        }
+        catch (error) {
+            console.error(
+                "Album playback failed:",
+                error
+            );
+        }
+    }
+);
+
+
+
+audio.addEventListener(
+    "ended",
+    async () => {
+
+        if (!albumMode) {
+
+            playButton.textContent =
+                "▶";
+
+            return;
+        }
+
+        albumIndex++;
+
+        if (
+            albumIndex >=
+            albumTracks.length
+        ) {
+            albumIndex = 0;
+        }
+
+        audio.src =
+            archiveBase +
+            albumTracks[albumIndex];
+
+        trackName.textContent =
+            albumNames[albumIndex];
+
+        waveformHistory.length =
+            0;
+
+        initialiseFrequencyHistory();
+
+        initialiseAudio();
+
+        await resumeAudio();
+
+        try {
+            await audio.play();
+        }
+        catch (error) {
+            console.error(
+                "Album playback failed:",
+                error
+            );
+        }
+    }
+);
+
+
+
+/* =========================================================
+   VOLUME
+   ========================================================= */
+
+volume.addEventListener(
+    "input",
+    () => {
+
+        audio.volume =
+            Number(
+                volume.value
+            );
+
+    }
+);
+
+
+audio.volume =
+    Number(
+        volume.value
+    );
+
+
+/* =========================================================
+   PROGRESS
+   ========================================================= */
+
+audio.addEventListener(
+    "timeupdate",
+    () => {
+
+        if (
+            !Number.isFinite(
+                audio.duration
+            )
+        ) {
+
+            return;
+        }
+
+
+        progress.value =
+            (
+                audio.currentTime /
+                audio.duration
+            ) *
+            100;
+
+
+        timeDisplay.textContent =
+            formatTime(
+                audio.currentTime
+            ) +
+            " / " +
+            formatTime(
+                audio.duration
+            );
+    }
+);
+
+
+/* =========================================================
+   SEEK
+   ========================================================= */
+
+progress.addEventListener(
+    "input",
+    () => {
+
+        if (
+            !Number.isFinite(
+                audio.duration
+            )
+        ) {
+
+            return;
+        }
+
+
+        audio.currentTime =
+            (
+                Number(
+                    progress.value
+                ) / 100
+            ) *
+            audio.duration;
+
+    }
+);
+
+
+/* =========================================================
+   FORMAT TIME
+   ========================================================= */
+
+function formatTime(seconds) {
+
+    if (
+        !Number.isFinite(
+            seconds
+        )
+    ) {
+
+        return "0:00";
+    }
+
+
+    const minutes =
+        Math.floor(
+            seconds / 60
+        );
+
+
+    const secs =
+        Math.floor(
+            seconds % 60
+        )
+        .toString()
+        .padStart(
+            2,
+            "0"
+        );
+
+
+    return (
+        minutes +
+        ":" +
+        secs
+    );
+}
+
+
+/* =========================================================
+   KEYBOARD
+   ========================================================= */
+
+document.addEventListener(
+    "keydown",
+    event => {
+
+        if (
+            event.target.tagName ===
+            "INPUT"
+        ) {
+
+            return;
+        }
+
+
+        const key =
+            event.key.toLowerCase();
+
+
+        /* ---------------------------------------------
+           A = cycle waveform type
+           --------------------------------------------- */
+
+        if (
+            key === "a"
+        ) {
+
+            if (
+                displayMode === "time"
+            ) {
+
+                waveformMode =
+                    (
+                        waveformMode + 1
+                    ) %
+                    waveformModes.length;
+
+
+                waveformHistory.length =
+                    0;
+
+
+                updateModeIndicator();
+
+            }
+
+            return;
+        }
+
+
+        /* ---------------------------------------------
+           R = reverse direction
+           --------------------------------------------- */
+
+        if (
+            key === "r"
+        ) {
+
+            if (
+                displayMode === "time"
+            ) {
+
+                reverseDirection =
+                    !reverseDirection;
+
+
+                waveformHistory.length =
+                    0;
+
+
+                lastWaveformTime =
+                    0;
+
+
+                updateModeIndicator();
+
+            }
+
+            return;
+        }
+
+
+        /* ---------------------------------------------
+           M = time / frequency
+           --------------------------------------------- */
+
+        if (
+            key === "m"
+        ) {
+
+            if (
+                displayMode === "time"
+            ) {
+
+                displayMode =
+                    "frequency";
+
+
+                waveformHistory.length =
+                    0;
+
+
+                /*
+                    Seed the complete FFT display immediately.
+                    Do not wait for the first animation interval.
+                    This creates every horizontal frequency line
+                    across the full width as soon as M is pressed.
+                */
+                seedFrequencyHistory();
+
+
+                lastFrequencyTime =
+                    0;
+
+            }
+            else {
+
+                displayMode =
+                    "time";
+
+
+                initialiseFrequencyHistory();
+
+
+                waveformHistory.length =
+                    0;
+
+
+                lastWaveformTime =
+                    0;
+
+            }
+
+
+            updateModeIndicator();
+
+            return;
+        }
+
+    }
+);
+
+
+/* =========================================================
+   MODE INDICATOR
+   ========================================================= */
+
+function updateModeIndicator() {
+
+    if (
+        displayMode === "time"
+    ) {
+
+        modeIndicator.textContent =
+            "M: TIME | A: " +
+            waveformModes[
+                waveformMode
+            ] +
+            " | R: " +
+            (
+                reverseDirection
+                    ? "TOP → BOTTOM"
+                    : "BOTTOM → TOP"
+            );
+
+    }
+    else {
+
+        modeIndicator.textContent =
+            "M: FREQUENCY | " +
+            "LOW → HIGH | " +
+            "RIGHT → LEFT";
+
+    }
+}
+
+
+/* =========================================================
+   START
+   ========================================================= */
+
+resizeCanvas();
+
+initialiseFrequencyHistory();
+
+updateModeIndicator();
+
+requestAnimationFrame(
+    draw
+);
+
+</script>
+
+</body>
+</html>
